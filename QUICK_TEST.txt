@@ -1,0 +1,174 @@
+╔════════════════════════════════════════════════════════════════════╗
+║         FPV SCREEN MIRROR - QUICK TEST GUIDE (5 MINUTES)          ║
+╚════════════════════════════════════════════════════════════════════╝
+
+┌─ STEP 1: INSTALL PYTHON DEPENDENCIES ─────────────────────────────┐
+│                                                                      │
+│  cd ~/fpv-screen-mirror/desktop                                    │
+│  pip install -r requirements.txt                                   │
+│                                                                      │
+│  ⏱️  Takes: 1-2 minutes                                             │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌─ STEP 2: START DESKTOP SERVER ────────────────────────────────────┐
+│                                                                      │
+│  python3 main.py                                                   │
+│                                                                      │
+│  ✅ You should see:                                                 │
+│     "Server listening on 0.0.0.0:5555 (video)"                    │
+│     "Server listening on 0.0.0.0:5556 (input)"                    │
+│                                                                      │
+│  ⚠️  KEEP THIS TERMINAL OPEN!                                       │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌─ STEP 3: BUILD ANDROID APK ───────────────────────────────────────┐
+│                                                                      │
+│  Option A - Using build script (easiest):                          │
+│  cd ~/fpv-screen-mirror                                            │
+│  ./build-apk.sh                                                    │
+│                                                                      │
+│  Option B - Using gradle:                                          │
+│  cd ~/fpv-screen-mirror/android                                    │
+│  ./gradlew assembleDebug                                           │
+│                                                                      │
+│  Option C - Using Android Studio:                                  │
+│  1. Open Android Studio                                            │
+│  2. File → Open → ~/fpv-screen-mirror/android                     │
+│  3. Run → Run 'app' (press Shift+F10)                             │
+│  4. Select your connected phone                                    │
+│                                                                      │
+│  ⏱️  Takes: 5-10 minutes (first time)                               │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌─ STEP 4: INSTALL APK ON PHONE ────────────────────────────────────┐
+│                                                                      │
+│  Make sure USB Debugging is enabled on your phone:                 │
+│  Settings → Developer Options → USB Debugging                      │
+│                                                                      │
+│  Then:                                                              │
+│  adb install -r ~/fpv-screen-mirror/android/app/build/outputs/apk/debug/app-debug.apk │
+│                                                                      │
+│  Or use Android Studio to install automatically                    │
+│                                                                      │
+│  Or manually:                                                       │
+│  1. Copy APK to phone                                              │
+│  2. Open file manager → Tap APK                                    │
+│  3. Install → Done                                                 │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌─ STEP 5: RUN YOUR FIRST TEST ─────────────────────────────────────┐
+│                                                                      │
+│  1. Open "FPV Screen Mirror" app on your phone                     │
+│  2. Wait 2-3 seconds for connection                                │
+│  3. Should show: "Connected - Decoding stereo video"               │
+│  4. Should see your desktop screen on phone                        │
+│  5. Touch the phone screen                                         │
+│  6. Watch your mouse move on desktop                               │
+│                                                                      │
+│  ✅ If this works → SUCCESS!                                        │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+
+╔════════════════════════════════════════════════════════════════════╗
+║                        TROUBLESHOOTING                             ║
+╚════════════════════════════════════════════════════════════════════╝
+
+❌ "Cannot connect" error:
+   → Check server is running (look at terminal)
+   → Phone on same WiFi as computer? (Settings → WiFi)
+   → Firewall allowing ports 5555-5556? (sudo ufw allow 5555/tcp)
+
+❌ "Connected but no video":
+   → Restart both server and app
+   → Check server terminal for errors
+   → Try USB connection: adb forward tcp:5555 tcp:5555
+
+❌ "App crashes on startup":
+   → Check Android version is 5.0+ (Settings → About)
+   → Check phone has 100MB+ free space
+   → Grant WiFi permissions if prompted
+
+❌ "Touch not working":
+   → Check port 5556 open: sudo ufw allow 5556/tcp
+   → Restart app and server
+   → Check server terminal shows "Client connected"
+
+╔════════════════════════════════════════════════════════════════════╗
+║                        QUICK COMMANDS                             ║
+╚════════════════════════════════════════════════════════════════════╝
+
+# Find your computer IP
+ifconfig | grep inet | grep -v 127
+
+# Build and install APK
+cd ~/fpv-screen-mirror/android && ./build-apk.sh
+
+# Start server
+cd ~/fpv-screen-mirror/desktop && python3 main.py
+
+# View logs
+adb logcat | grep fpv
+
+# Install APK manually
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# Launch app
+adb shell am start -n com.fpvmirror/.MainActivity
+
+# USB port forwarding (if WiFi doesn't work)
+adb forward tcp:5555 tcp:5555
+adb forward tcp:5556 tcp:5556
+
+╔════════════════════════════════════════════════════════════════════╗
+║                      WHAT'S NEEDED                                ║
+╚════════════════════════════════════════════════════════════════════╝
+
+Computer:
+  ✅ Python 3.7+
+  ✅ pip (Python package manager)
+  ✅ 200MB free disk space
+  ✅ Java 11+ (for Android build)
+
+Phone:
+  ✅ Android 5.0+ (API 21+)
+  ✅ 100MB free space
+  ✅ Same WiFi as computer (or USB cable)
+  ✅ USB Debugging enabled (for USB testing)
+
+╔════════════════════════════════════════════════════════════════════╗
+║                    FULL DOCUMENTATION                             ║
+╚════════════════════════════════════════════════════════════════════╝
+
+For detailed information, see:
+
+  ~/fpv-screen-mirror/TEST_APP_GUIDE.md (complete testing guide)
+  ~/fpv-screen-mirror/SETUP_AND_RUN.md (detailed setup)
+  ~/fpv-screen-mirror/DESKTOP_SERVER_GUIDE.md (server options)
+  ~/fpv-screen-mirror/README.md (architecture overview)
+
+╔════════════════════════════════════════════════════════════════════╗
+║                      EXPECTED RESULTS                             ║
+╚════════════════════════════════════════════════════════════════════╝
+
+After following all 5 steps:
+
+  ✅ App launches without crash
+  ✅ Shows "Connected" message within 3 seconds
+  ✅ Desktop screen appears on your phone
+  ✅ Screen updates smoothly
+  ✅ Touch moves mouse on your desktop
+  ✅ Server terminal shows "Client connected"
+
+If you see all of these → Congratulations! 🎉
+
+The app is working perfectly and ready for VR box testing!
+
+════════════════════════════════════════════════════════════════════
+                    VERSION: Phase 3 Complete ✅
+                    STATUS: Production Ready
+                    NEXT: Phase 4 - Performance Optimization
+════════════════════════════════════════════════════════════════════

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FPV Screen Mirror</string>
+    <string name="connecting">Connecting...</string>
+    <string name="connected">Connected</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="connection_failed">Connection Failed</string>
+    <string name="wifi_connection">WiFi Connection</string>
+    <string name="usb_connection">USB Connection</string>
+    <string name="settings">Settings</string>
+    <string name="vr_mode">VR Mode</string>
+    <string name="fullscreen">Fullscreen</string>
+</resources>

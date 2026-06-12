@@ -1,0 +1,15 @@
+# FPV Screen Mirror - Desktop Server Requirements
+
+# Core dependencies
+numpy>=1.21.0
+Pillow>=9.0.0
+
+# Video encoding (optional - can use FFmpeg system binary instead)
+# opencv-python>=4.5.0
+# imageio-ffmpeg>=0.4.5
+
+# Networking
+# (Python stdlib sockets)
+
+# Utilities
+# colorama>=0.4.4
