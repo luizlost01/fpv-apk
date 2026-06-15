@@ -1,64 +1,109 @@
 package com.fpvmirror
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.SurfaceTexture
 import android.util.AttributeSet
 import android.util.Log
 import android.view.MotionEvent
 import android.view.TextureView
-import com.fpvmirror.decoder.H264Decoder
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 /**
- * Custom TextureView for rendering stereo VR screen mirror
- * Uses H.264 decoder for real-time video decoding
- * Displays side-by-side stereo: left eye | right eye
+ * Custom TextureView for rendering stereo VR screen mirror or 2D mirror
+ * Optimized for Phase 1 JPEG streaming
  */
 class StereoSurfaceView(context: Context, attrs: AttributeSet? = null) :
     TextureView(context, attrs), TextureView.SurfaceTextureListener {
 
-    private val paint = Paint()
-    private var decoder: H264Decoder? = null
     private var isConnected = true
-    private var frameCount = 0
-
-    private val coroutineScope = CoroutineScope(Dispatchers.Main)
+    private var isVRMode = true
+    
+    private val paint = Paint().apply {
+        isFilterBitmap = true
+        isAntiAlias = true
+    }
 
     private var touchListener: ((x: Int, y: Int) -> Unit)? = null
     private var onStatusChanged: ((String) -> Unit)? = null
 
     init {
         surfaceTextureListener = this
-        // setBackgroundColor(Color.BLACK) // ❌ REMOVED: TextureView doesn't support background colors
+        background = null
     }
 
     /**
-     * Decode and display H.264 frame
+     * Set rendering mode: true for SBS Stereo, false for 1:1 Mirror
+     */
+    fun setMode(vrMode: Boolean) {
+        this.isVRMode = vrMode
+        Log.d(TAG, "Mode set to: ${if (vrMode) "VR (SBS)" else "Mirror (2D)"}")
+    }
+
+    /**
+     * Decode and display JPEG frame
      */
     fun decodeFrame(data: ByteArray) {
-        coroutineScope.launch {
-            decoder?.let {
-                val success = it.decodeFrame(data)
-                if (success) {
-                    frameCount++
-                    if (frameCount % 60 == 0) {
-                        Log.d(TAG, "Decoded $frameCount frames")
-                    }
-                } else {
-                    Log.w(TAG, "Frame decode failed")
+        try {
+            // 1. Decode JPEG to Bitmap
+            val bitmap = BitmapFactory.decodeByteArray(data, 0, data.size)
+            if (bitmap == null) {
+                Log.w(TAG, "Failed to decode JPEG data")
+                return
+            }
+
+            // 2. Draw to Canvas
+            val canvas = lockCanvas()
+            if (canvas != null) {
+                try {
+                    renderFrame(canvas, bitmap)
+                } finally {
+                    unlockCanvasAndPost(canvas)
                 }
             }
+            
+            // Cleanup bitmap quickly
+            // bitmap.recycle() // Better let GC handle it if we are fast
+        } catch (e: Exception) {
+            Log.e(TAG, "Error rendering frame: ${e.message}")
+        }
+    }
+
+    private fun renderFrame(canvas: Canvas, bitmap: Bitmap) {
+        canvas.drawColor(Color.BLACK)
+
+        val srcRect = Rect(0, 0, bitmap.width, bitmap.height)
+        
+        if (isVRMode) {
+            // Side-by-Side (SBS) mode: Duplicate image for both eyes
+            val halfWidth = width / 2
+            
+            // Left eye
+            val leftDest = Rect(0, 0, halfWidth, height)
+            canvas.drawBitmap(bitmap, srcRect, leftDest, paint)
+            
+            // Right eye
+            val rightDest = Rect(halfWidth, 0, width, height)
+            canvas.drawBitmap(bitmap, srcRect, rightDest, paint)
+            
+            // Divider line
+            paint.color = Color.DKGRAY
+            canvas.drawLine(halfWidth.toFloat(), 0f, halfWidth.toFloat(), height.toFloat(), paint)
+        } else {
+            // Standard Mirror mode
+            val destRect = Rect(0, 0, width, height)
+            canvas.drawBitmap(bitmap, srcRect, destRect, paint)
         }
     }
 
     fun setConnected(connected: Boolean) {
         isConnected = connected
         if (connected) {
-            onStatusChanged?.invoke("Connected - Decoding stereo video")
+            onStatusChanged?.invoke("Connected - Receiving JPEG stream")
         } else {
             onStatusChanged?.invoke("Disconnected")
         }
@@ -74,30 +119,14 @@ class StereoSurfaceView(context: Context, attrs: AttributeSet? = null) :
 
     override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
         Log.d(TAG, "SurfaceTexture available: ${width}x$height")
-
-        try {
-            decoder = H264Decoder(android.view.Surface(surface))
-            onStatusChanged?.invoke("Decoder initialized")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to create decoder: ${e.message}")
-            onStatusChanged?.invoke("Decoder error: ${e.message}")
-        }
+        onStatusChanged?.invoke("Surface Ready")
     }
 
-    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-        Log.d(TAG, "SurfaceTexture destroyed")
-        decoder?.stop()
-        decoder = null
-        return true
-    }
+    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean = true
 
-    override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-        Log.d(TAG, "SurfaceTexture size changed: ${width}x$height")
-    }
+    override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {}
 
-    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
-        // Called when new frame is available - rendering happens automatically
-    }
+    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.action) {
@@ -105,12 +134,14 @@ class StereoSurfaceView(context: Context, attrs: AttributeSet? = null) :
                 val touchX = event.x.toInt()
                 val touchY = event.y.toInt()
 
-                // Map touch coordinates accounting for stereo layout
-                // Screen is 3840 wide (1920 left + 1920 right)
-                val mappedX = if (touchX > width / 2) {
-                    touchX - (width / 2)  // Right eye touch, map to second half
+                val mappedX = if (isVRMode) {
+                    if (touchX > width / 2) {
+                        touchX - (width / 2)
+                    } else {
+                        touchX
+                    }
                 } else {
-                    touchX  // Left eye touch
+                    touchX
                 }
 
                 touchListener?.invoke(mappedX, touchY)
@@ -119,10 +150,7 @@ class StereoSurfaceView(context: Context, attrs: AttributeSet? = null) :
         return true
     }
 
-    fun cleanup() {
-        decoder?.stop()
-        decoder = null
-    }
+    fun cleanup() {}
 
     companion object {
         private const val TAG = "StereoSurfaceView"

@@ -5,8 +5,6 @@ import android.media.MediaCodec
 import android.media.MediaFormat
 import android.util.Log
 import android.view.Surface
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 
 /**
@@ -16,8 +14,9 @@ import java.nio.ByteBuffer
 class H264Decoder(private val surface: Surface) {
     
     private var mediaCodec: MediaCodec? = null
-    private val timeoutUs = 10000L  // 10ms timeout
+    private val timeoutUs = 0L  // Non-blocking for high-speed streaming
     private var isRunning = false
+    private val bufferInfo = MediaCodec.BufferInfo()
     
     init {
         try {
@@ -31,73 +30,81 @@ class H264Decoder(private val surface: Surface) {
         // Create H.264 decoder
         mediaCodec = MediaCodec.createDecoderByType(MIME_TYPE)
         
-        // Configure with stereo resolution (3840x1080)
-        val format = MediaFormat.createVideoFormat(MIME_TYPE, VIDEO_WIDTH, VIDEO_HEIGHT).apply {
+        // Initial configuration (will be updated by stream SPS/PPS)
+        val format = MediaFormat.createVideoFormat(MIME_TYPE, 1920, 1080).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, COLOR_FORMAT)
-            setInteger(MediaFormat.KEY_MAX_WIDTH, VIDEO_WIDTH)
-            setInteger(MediaFormat.KEY_MAX_HEIGHT, VIDEO_HEIGHT)
+            // Allow larger resolutions for VR mode
+            setInteger(MediaFormat.KEY_MAX_WIDTH, 3840)
+            setInteger(MediaFormat.KEY_MAX_HEIGHT, 1080)
+            // Low latency hints (Android 11+)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+            }
         }
         
         mediaCodec?.configure(format, surface, null, 0)
         mediaCodec?.start()
         isRunning = true
-        Log.d(TAG, "H.264 decoder initialized (${VIDEO_WIDTH}x${VIDEO_HEIGHT})")
+        Log.d(TAG, "H.264 decoder started")
     }
     
-    suspend fun decodeFrame(data: ByteArray): Boolean = withContext(Dispatchers.Default) {
-        if (!isRunning || data.isEmpty()) return@withContext false
+    /**
+     * Decode frame data (Synchronous/Blocking on caller thread)
+     */
+    fun decodeFrame(data: ByteArray): Boolean {
+        if (!isRunning || data.isEmpty()) return false
         
         try {
-            val codec = mediaCodec ?: return@withContext false
+            val codec = mediaCodec ?: return false
             
-            // Get input buffer
+            // 1. Feed input
             val inputBufferIndex = codec.dequeueInputBuffer(timeoutUs)
-            if (inputBufferIndex < 0) return@withContext false
-            
-            val inputBuffer = codec.getInputBuffer(inputBufferIndex)
-            inputBuffer?.apply {
-                clear()
-                put(data)
-                flip()
+            if (inputBufferIndex >= 0) {
+                val inputBuffer = codec.getInputBuffer(inputBufferIndex)
+                inputBuffer?.apply {
+                    clear()
+                    put(data)
+                }
+                codec.queueInputBuffer(
+                    inputBufferIndex,
+                    0,
+                    data.size,
+                    System.nanoTime() / 1000,
+                    0
+                )
+            } else {
+                // If input buffer not available, we might be lagging
+                Log.w(TAG, "No input buffer available - dropping frame")
             }
             
-            // Queue the input buffer with frame data
-            codec.queueInputBuffer(
-                inputBufferIndex,
-                0,
-                data.size,
-                System.nanoTime() / 1000,  // presentation time in microseconds
-                0
-            )
-            
-            // Get and render output
-            val bufferInfo = MediaCodec.BufferInfo()
-            val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, timeoutUs)
-            
-            return@withContext when {
-                outputBufferIndex >= 0 -> {
-                    codec.releaseOutputBuffer(outputBufferIndex, true)
-                    true
-                }
-                outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                    Log.d(TAG, "Decoder output format changed")
-                    true
-                }
-                else -> false
+            // 2. Drain ALL available output buffers to prevent black screen/stalls
+            var outputCount = 0
+            var outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, timeoutUs)
+            while (outputBufferIndex >= 0) {
+                codec.releaseOutputBuffer(outputBufferIndex, true)
+                outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, timeoutUs)
+                outputCount++
             }
+            
+            if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                val newFormat = codec.outputFormat
+                Log.d(TAG, "Format changed: ${newFormat.getInteger(MediaFormat.KEY_WIDTH)}x${newFormat.getInteger(MediaFormat.KEY_HEIGHT)}")
+            }
+            
+            return outputCount > 0
         } catch (e: Exception) {
             Log.e(TAG, "Decode error: ${e.message}")
-            false
+            return false
         }
     }
     
     fun stop() {
         if (isRunning) {
             try {
+                isRunning = false
                 mediaCodec?.stop()
                 mediaCodec?.release()
                 mediaCodec = null
-                isRunning = false
                 Log.d(TAG, "Decoder stopped")
             } catch (e: Exception) {
                 Log.e(TAG, "Error stopping decoder: ${e.message}")
@@ -107,10 +114,7 @@ class H264Decoder(private val surface: Surface) {
     
     companion object {
         private const val TAG = "H264Decoder"
-        private const val MIME_TYPE = "video/avc"  // H.264
-        private const val VIDEO_WIDTH = 3840
-        private const val VIDEO_HEIGHT = 1080
-        // FIXED: Removed the invalid MediaFormat prefix
+        private const val MIME_TYPE = "video/avc"
         private const val COLOR_FORMAT = MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
     }
 }

@@ -3,6 +3,8 @@ import socket
 import cv2
 import numpy as np
 from mss import mss
+import struct
+import time
 
 class ScreenMirrorServer:
     def __init__(self, host, video_port, input_port, vr_mode, width, height, fps):
@@ -25,6 +27,11 @@ class ScreenMirrorServer:
         self.input_socket.listen(5)
         
         self.running = False
+        
+        # Add a thread-safe variable to hold the latest screen capture
+        self.current_frame = None
+        self.frame_lock = threading.Lock()
+        
         self.screenshot_thread = threading.Thread(target=self._capture_screenshots)
         self.video_server_thread = threading.Thread(target=self._video_server)
 
@@ -35,6 +42,13 @@ class ScreenMirrorServer:
 
     def stop(self):
         self.running = False
+        # Create dummy connections to unblock the accept() calls
+        try:
+            socket.create_connection((self.host, self.video_port), timeout=1)
+            socket.create_connection((self.host, self.input_port), timeout=1)
+        except:
+            pass
+            
         self.server_socket.close()
         self.input_socket.close()
         self.screenshot_thread.join()
@@ -44,37 +58,58 @@ class ScreenMirrorServer:
         with mss() as sct:
             monitor = {"top": 0, "left": 0, "width": self.width, "height": self.height}
             while self.running:
+                # Grab the screen
                 screenshot = np.array(sct.grab(monitor))
-                # Optionally, process the screenshot here
-                # For example, apply OpenCV transformations or filters
-                # screenshot = cv2.cvtColor(screenshot, cv2.COLOR_RGBA2RGB)
+                
+                # Convert from BGRA (mss format) to BGR (standard OpenCV format)
+                frame = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2BGR)
+                
+                # Safely update the current frame so the video server can read it
+                with self.frame_lock:
+                    self.current_frame = frame
+                
+                # Sleep briefly to target the desired FPS and not burn 100% CPU
+                time.sleep(1.0 / self.fps)
 
     def _video_server(self):
         while self.running:
             client_socket, addr = self.server_socket.accept()
+            if not self.running:
+                break
+                
             print(f"Connected to {addr}")
             
             try:
-                cap = cv2.VideoCapture(0)  # Assuming you want to capture from the default camera
-                while self.running and cap.isOpened():
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
+                while self.running:
+                    # Safely get the latest frame
+                    with self.frame_lock:
+                        frame = self.current_frame
+                        
+                    if frame is None:
+                        time.sleep(0.01)
+                        continue
                     
-                    # Encode the frame as JPEG
-                    _, buffer = cv2.imencode('.jpg', frame)
+                    # Encode the frame as JPEG to send over network
+                    ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                    if not ret:
+                        continue
+                        
                     data = buffer.tobytes()
 
-                    client_socket.sendall(struct.pack("Q", len(data)) + data)  # Send frame size and frame data
-                
-                cap.release()
+                    # Send frame size (using Q for unsigned long long, 8 bytes) and then the frame data
+                    client_socket.sendall(struct.pack("Q", len(data)) + data)
+                    
+                    # Cap the network sending rate to the target FPS
+                    time.sleep(1.0 / self.fps)
+                    
             except Exception as e:
-                print(f"Video server error: {e}")
+                print(f"Video server error or client disconnected: {e}")
             finally:
                 client_socket.close()
                 print(f"Disconnected from {addr}")
 
 if __name__ == "__main__":
+    import sys
     server = ScreenMirrorServer(
         host='0.0.0.0',
         video_port=5554,
