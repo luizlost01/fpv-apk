@@ -18,17 +18,12 @@ class ScreenMirrorServer:
         
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # Low latency socket options
+        self.server_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.server_socket.bind((self.host, self.video_port))
         self.server_socket.listen(5)
-        
-        self.input_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.input_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.input_socket.bind((self.host, self.input_port))
-        self.input_socket.listen(5)
-        
+
         self.running = False
-        
-        # Add a thread-safe variable to hold the latest screen capture
         self.current_frame = None
         self.frame_lock = threading.Lock()
         
@@ -42,96 +37,61 @@ class ScreenMirrorServer:
 
     def stop(self):
         self.running = False
-        # Create dummy connections to unblock the accept() calls
-        try:
-            socket.create_connection((self.host, self.video_port), timeout=1)
-            socket.create_connection((self.host, self.input_port), timeout=1)
-        except:
-            pass
-            
         self.server_socket.close()
-        self.input_socket.close()
-        self.screenshot_thread.join()
-        self.video_server_thread.join()
 
     def _capture_screenshots(self):
         with mss() as sct:
             monitor = {"top": 0, "left": 0, "width": self.width, "height": self.height}
+            target_frame_time = 1.0 / self.fps
             while self.running:
-                # Grab the screen
+                start_time = time.time()
                 screenshot = np.array(sct.grab(monitor))
-                
-                # Convert from BGRA (mss format) to BGR (standard OpenCV format)
                 frame = cv2.cvtColor(screenshot, cv2.COLOR_BGRA2BGR)
                 
-                # Safely update the current frame so the video server can read it
                 with self.frame_lock:
                     self.current_frame = frame
                 
-                # Sleep briefly to target the desired FPS and not burn 100% CPU
-                time.sleep(1.0 / self.fps)
+                # Dynamic sleep to maintain target FPS
+                elapsed = time.time() - start_time
+                sleep_time = max(0, target_frame_time - elapsed)
+                time.sleep(sleep_time)
 
     def _video_server(self):
         while self.running:
-            client_socket, addr = self.server_socket.accept()
-            if not self.running:
-                break
-                
-            print(f"Connected to {addr}")
-            
             try:
+                client_socket, addr = self.server_socket.accept()
+                client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                client_socket.settimeout(5.0)
+                print(f"Connected to {addr}")
+
+                last_frame_sent = None
+
                 while self.running:
-                    # Safely get the latest frame
                     with self.frame_lock:
                         frame = self.current_frame
-                        
-                    if frame is None:
-                        time.sleep(0.01)
+
+                    if frame is None or frame is last_frame_sent:
+                        time.sleep(0.001)
                         continue
                     
-                    # Encode the frame as JPEG to send over network
-                    ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                    # Faster JPEG encoding (Lower quality = much faster + less bandwidth)
+                    ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
                     if not ret:
                         continue
                         
                     data = buffer.tobytes()
+                    try:
+                        # Send 8-byte length + payload
+                        client_socket.sendall(struct.pack("<Q", len(data)) + data)
+                        last_frame_sent = frame
+                    except (socket.error, BrokenPipeError):
+                        break
 
-                    # Send frame size (using Q for unsigned long long, 8 bytes) and then the frame data
-                    client_socket.sendall(struct.pack("Q", len(data)) + data)
-                    
-                    # Cap the network sending rate to the target FPS
-                    time.sleep(1.0 / self.fps)
-                    
             except Exception as e:
-                print(f"Video server error or client disconnected: {e}")
+                print(f"Server error: {e}")
             finally:
-                client_socket.close()
-                print(f"Disconnected from {addr}")
+                print("Client disconnected")
 
 if __name__ == "__main__":
-    import sys
-    server = ScreenMirrorServer(
-        host='0.0.0.0',
-        video_port=5554,
-        input_port=5556,
-        vr_mode=True,
-        width=1920,
-        height=1080,
-        fps=60
-    )
-    
-    try:
-        print("Starting FPV Screen Mirror Server...")
-        print(f"Video Port: {server.video_port}")
-        print(f"Input Port: {server.input_port}")
-        print(f"VR Mode: {server.vr_mode}")
-        print(f"Resolution: {server.width}x{server.height} @ {server.fps} FPS")
-        print("Press Ctrl+C to stop...")
-        
-        server.start()
-    except KeyboardInterrupt:
-        print("\nShutting down...")
-        server.stop()
-    except Exception as e:
-        print(f"Error: {e}")
-        sys.exit(1)
+    server = ScreenMirrorServer('0.0.0.0', 5554, 5556, True, 1920, 1080, 60)
+    server.start()
