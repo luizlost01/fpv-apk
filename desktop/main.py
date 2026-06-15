@@ -13,7 +13,7 @@ def main():
     """Main entry point for the desktop server"""
     server = ScreenMirrorServer(
         host='0.0.0.0',
-        video_port=5555,
+        video_port=5554,
         input_port=5556,
         vr_mode=True,
         width=1920,

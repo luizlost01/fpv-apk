@@ -134,7 +134,7 @@ class WiFiConnectionManager(context: Context) {
         private const val SERVICE_TYPE = "_fpvmirror._tcp."
         private const val SERVICE_NAME = "FPV Screen Mirror"
         
-        const val DEFAULT_VIDEO_PORT = 5555
+        const val DEFAULT_VIDEO_PORT = 5554
         const val DEFAULT_INPUT_PORT = 5556
     }
 }

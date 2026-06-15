@@ -15,7 +15,7 @@ object ProtocolDefinition {
     const val MSG_CONFIG = 0x06
     
     // Default values
-    const val DEFAULT_VIDEO_PORT = 5555
+    const val DEFAULT_VIDEO_PORT = 5554
     const val DEFAULT_INPUT_PORT = 5556
     const val HEARTBEAT_INTERVAL_MS = 1000
     const val FRAME_TIMEOUT_MS = 5000

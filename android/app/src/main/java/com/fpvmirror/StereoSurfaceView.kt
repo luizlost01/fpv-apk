@@ -20,22 +20,22 @@ import kotlinx.coroutines.launch
  */
 class StereoSurfaceView(context: Context, attrs: AttributeSet? = null) :
     TextureView(context, attrs), TextureView.SurfaceTextureListener {
-    
+
     private val paint = Paint()
     private var decoder: H264Decoder? = null
-    private var isConnected = false
+    private var isConnected = true
     private var frameCount = 0
-    
+
     private val coroutineScope = CoroutineScope(Dispatchers.Main)
-    
+
     private var touchListener: ((x: Int, y: Int) -> Unit)? = null
     private var onStatusChanged: ((String) -> Unit)? = null
-    
+
     init {
         surfaceTextureListener = this
-        setBackgroundColor(Color.BLACK)
+        // setBackgroundColor(Color.BLACK) // ❌ REMOVED: TextureView doesn't support background colors
     }
-    
+
     /**
      * Decode and display H.264 frame
      */
@@ -54,7 +54,7 @@ class StereoSurfaceView(context: Context, attrs: AttributeSet? = null) :
             }
         }
     }
-    
+
     fun setConnected(connected: Boolean) {
         isConnected = connected
         if (connected) {
@@ -63,18 +63,18 @@ class StereoSurfaceView(context: Context, attrs: AttributeSet? = null) :
             onStatusChanged?.invoke("Disconnected")
         }
     }
-    
+
     fun setTouchListener(listener: (x: Int, y: Int) -> Unit) {
         touchListener = listener
     }
-    
+
     fun setStatusChangeListener(listener: (String) -> Unit) {
         onStatusChanged = listener
     }
-    
+
     override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
         Log.d(TAG, "SurfaceTexture available: ${width}x$height")
-        
+
         try {
             decoder = H264Decoder(android.view.Surface(surface))
             onStatusChanged?.invoke("Decoder initialized")
@@ -83,28 +83,28 @@ class StereoSurfaceView(context: Context, attrs: AttributeSet? = null) :
             onStatusChanged?.invoke("Decoder error: ${e.message}")
         }
     }
-    
+
     override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
         Log.d(TAG, "SurfaceTexture destroyed")
         decoder?.stop()
         decoder = null
         return true
     }
-    
+
     override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
         Log.d(TAG, "SurfaceTexture size changed: ${width}x$height")
     }
-    
+
     override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
         // Called when new frame is available - rendering happens automatically
     }
-    
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.action) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
                 val touchX = event.x.toInt()
                 val touchY = event.y.toInt()
-                
+
                 // Map touch coordinates accounting for stereo layout
                 // Screen is 3840 wide (1920 left + 1920 right)
                 val mappedX = if (touchX > width / 2) {
@@ -112,18 +112,18 @@ class StereoSurfaceView(context: Context, attrs: AttributeSet? = null) :
                 } else {
                     touchX  // Left eye touch
                 }
-                
+
                 touchListener?.invoke(mappedX, touchY)
             }
         }
         return true
     }
-    
+
     fun cleanup() {
         decoder?.stop()
         decoder = null
     }
-    
+
     companion object {
         private const val TAG = "StereoSurfaceView"
     }

@@ -97,22 +97,20 @@ class MainActivity : AppCompatActivity() {
                 if (wifiManager.isWiFiConnected()) {
                     Log.d(TAG, "WiFi is connected, attempting WiFi connection...")
                     
-                    // Try to discover server via mDNS
+                    // Start mDNS discovery instead of hardcoding .100
+                    wifiManager.startServerDiscovery { host, port ->
+                        lifecycleScope.launch {
+                            val connected = fpvClient.connectViaWiFi(host, port)
+                            if (connected) {
+                                Log.d(TAG, "Connected via WiFi mDNS: $host:$port")
+                            }
+                        }
+                    }
+
+                    // Fallback to local IP check for logging or quick manual retry
                     val localIP = wifiManager.getLocalIP()
                     if (localIP != null) {
                         Log.d(TAG, "Local IP: $localIP")
-                        // Try default server port
-                        val serverIP = localIP.substringBeforeLast(".") + ".100"  // Assume server is at x.x.x.100
-                        
-                        val connected = fpvClient.connectViaWiFi(
-                            serverIP,
-                            WiFiConnectionManager.DEFAULT_VIDEO_PORT
-                        )
-                        
-                        if (connected) {
-                            Log.d(TAG, "Connected via WiFi")
-                            return@launch
-                        }
                     }
                 } else {
                     Log.d(TAG, "WiFi not connected, attempting USB ADB connection...")
@@ -136,7 +134,9 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun showToast(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        runOnUiThread {
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        }
     }
     
     override fun onDestroy() {
